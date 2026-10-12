@@ -1,70 +1,105 @@
-# Railway Deployment Guide for DeadlineDock Backend
+# 🚀 Cloud & Production Deployment Guide ("Outside" Deployment)
 
-This Spring Boot application is fully configured for deployment on [Railway](https://railway.app/).
+This Spring Boot application is fully containerized and configured for deployment on cloud platforms such as [Railway](https://railway.app/) and [Render](https://render.com/).
 
 ---
 
-## 1. Push Code to GitHub
+## Architecture Overview
 
-Open PowerShell in the `DeadlineDock` directory:
+```
+                      ┌──────────────────────────────────────────┐
+                      │          GitHub Pages Frontend           │
+                      │  https://arshilreddy3.github.io/deadlinedock/
+                      └────────────────────┬─────────────────────┘
+                                           │ HTTPS Fetch API
+                                           ▼
+                      ┌──────────────────────────────────────────┐
+                      │          Cloud Backend (Railway)         │
+                      │   https://<your-service>.up.railway.app  │
+                      └────────────────────┬─────────────────────┘
+                                           │ JDBC (Port 3306)
+                                           ▼
+                      ┌──────────────────────────────────────────┐
+                      │          Managed Cloud MySQL             │
+                      │      (Railway MySQL / TiDB / Aiven)      │
+                      └──────────────────────────────────────────┘
+```
 
+---
+
+## Option A: Deploy to Railway (Recommended)
+
+### 1. Push Backend to GitHub
+Ensure all latest commits are pushed to your backend repository:
 ```powershell
 cd C:\Deadlinedock\deadlinedock-backend
+git add .
+git commit -m "ci: add deployment config and health endpoints"
+git push origin main
 ```
 
-If you haven't created a GitHub repository yet:
-1. Go to [GitHub](https://github.com/new) and create a new repository named `deadlinedock-backend` (or your preferred name).
-2. Run the following commands to push your code:
-
-```powershell
-git remote add origin https://github.com/<your-username>/deadlinedock-backend.git
-git branch -M main
-git push -u origin main
-```
-
-*(If you already have a remote repo, simply run `git push`)*
-
----
-
-## 2. Deploy to Railway
-
+### 2. Create Project & MySQL on Railway
 1. Go to [railway.app](https://railway.app/) and sign in.
-2. Click **+ New Project** -> **Deploy from GitHub repo**.
-3. Select your `deadlinedock-backend` repository.
-4. Railway will automatically detect the `Dockerfile` and `railway.json` and start the build.
+2. Click **+ New Project** -> **Provision MySQL**.
+3. Railway automatically sets up a managed MySQL database with credentials (`MYSQLHOST`, `MYSQLPORT`, `MYSQLUSER`, `MYSQLPASSWORD`, `MYSQLDATABASE`).
 
----
+### 3. Deploy Backend Service
+1. In the same Railway project, click **+ New** -> **GitHub Repo**.
+2. Select your `deadlinedockbackend` repository.
+3. Railway automatically detects the `Dockerfile` and builds the production container.
 
-## 3. Configure Environment Variables in Railway
+### 4. Connect Backend to MySQL
+In your backend service on Railway:
+- Go to the **Variables** tab -> click **+ New Variable** -> **Reference**.
+- You can either reference Railway MySQL variables or supply a custom `DB_URL`:
 
-In Railway, navigate to your service -> **Variables** tab, and add the following variables:
-
-| Variable Name | Description | Example Value |
+| Variable | Recommended Value | Note |
 | :--- | :--- | :--- |
-| `DB_URL` | JDBC URL of your cloud MySQL instance | `jdbc:mysql://<host>:<port>/<dbname>?useSSL=true&allowPublicKeyRetrieval=true` |
-| `DB_USERNAME` | MySQL database username | `root` or `admin` |
-| `DB_PASSWORD` | MySQL database password | `your_db_password` |
+| `DB_URL` | `jdbc:mysql://${{MySQL.MYSQLHOST}}:${{MySQL.MYSQLPORT}}/${{MySQL.MYSQLDATABASE}}?createDatabaseIfNotExist=true&allowPublicKeyRetrieval=true&useSSL=false` | Railway variable reference |
+| `DB_USERNAME` | `${{MySQL.MYSQLUSER}}` | MySQL username |
+| `DB_PASSWORD` | `${{MySQL.MYSQLPASSWORD}}` | MySQL password |
 
 > [!NOTE]
 > `PORT` is assigned automatically by Railway into the container environment. The application is configured to automatically listen on `${PORT:8080}`.
 
----
-
-## 4. Generate Public Domain & Test
-
+### 5. Generate Public Domain & Test
 1. In Railway, click **Settings** -> **Networking** -> **Generate Domain**.
-2. You will get a public HTTPS URL (e.g., `https://deadlinedock-production.up.railway.app`).
+2. You will receive a public HTTPS URL (e.g. `https://deadlinedockbackend-production.up.railway.app`).
 3. Verify your backend is running:
-   - Open `https://<your-service>.up.railway.app/api/assignments` in your browser.
-   - You should receive an HTTP 200 with an empty JSON array `[]` (or existing records).
+   - Root health check: `https://<your-service>.up.railway.app/` -> Returns `{"status":"UP","app":"DeadlineDock Backend"}`
+   - Health check: `https://<your-service>.up.railway.app/api/health` -> Returns `{"status":"UP"}`
+   - Assignments: `https://<your-service>.up.railway.app/api/assignments` -> Returns `[]`
 
 ---
 
-## 5. Connect Frontend
+## Option B: Deploy to Render (Alternative Free Tier)
 
-In your frontend [`script.js`](file:///c:/Deadlinedock/deadlinedock-frontend/script.js#L1):
-Change line 1:
-```javascript
-const API_URL = "https://<your-railway-domain>.up.railway.app/api/assignments";
-```
-CORS is already configured with `@CrossOrigin(origins = "*")` on `AssignmentController`, so all frontend requests will work seamlessly.
+1. Sign up at [render.com](https://render.com/).
+2. Click **New +** -> **Web Service**.
+3. Connect your GitHub repository `arshilreddy3/deadlinedockbackend`.
+4. Runtime: **Docker**.
+5. Environment Variables:
+   - `DB_URL`: `jdbc:mysql://<host>:<port>/<dbname>?useSSL=true&allowPublicKeyRetrieval=true`
+   - `DB_USERNAME`: `<db_user>`
+   - `DB_PASSWORD`: `<db_password>`
+6. Render will build and deploy the container at `https://deadlinedockbackend.onrender.com`.
+
+---
+
+## 6. Connect Frontend to the Cloud Backend
+
+Once you have your cloud backend URL (e.g., `https://deadlinedockbackend-production.up.railway.app`):
+
+1. Open [`c:/Deadlinedock/deadlinedock-frontend/script.js`](file:///c:/Deadlinedock/deadlinedock-frontend/script.js#L6)
+2. Update `PRODUCTION_API_URL`:
+   ```javascript
+   const PRODUCTION_API_URL = "https://<your-service>.up.railway.app/api/assignments";
+   ```
+3. Commit and push:
+   ```powershell
+   cd C:\Deadlinedock\deadlinedock-frontend
+   git add script.js
+   git commit -m "chore: connect frontend to cloud backend URL"
+   git push origin main
+   ```
+4. GitHub Pages will instantly update, and your live application will now communicate directly with your live cloud backend!
